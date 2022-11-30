@@ -71,7 +71,7 @@ all_players <- data_filt %>%
 ```
 ### Purpose
 
-The purpose of this report is to highlight the past year of jumps for 5 players within the Toronto Blue Jays organization.
+The purpose of this report is to highlight jumps from the 2022 season for 5 players within the Toronto Blue Jays organization.
 
 ### Methods
 
