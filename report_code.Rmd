@@ -1,0 +1,217 @@
+---
+title: \vspace{-3.5cm} Blue Jays CMJ Report
+author: Fletcher Ekern
+output: 
+  pdf_document:
+    fig_width: 7
+    fig_height: 3
+    fig_caption: yes
+    keep_tex: yes 
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  \usepackage{float}
+ \floatplacement{figure}{H}
+---
+
+``` {r libraries, echo=F, warnings=F}
+
+pacman::p_load(tidyverse, tidytable, data.table, lubridate, runner, patchwork, tinytex, float)
+
+options( tinytex.verbose = TRUE)
+knitr::opts_chunk$set(fig.pos = 'H')
+
+```
+
+``` {r import, echo=F, warnings=F}
+
+data <- fread("CMJ_data.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate.(metric_name = str_to_lower(metric_name)) %>% 
+  select.(-test_name)
+
+data_filt <- data %>% 
+  mutate.(date = as.Date(date)) %>% 
+  pivot_wider.(names_from = metric_name, values_from = metric_value, id_cols = c(date, player, testid)) %>% 
+  janitor::clean_names() %>% 
+  select.(c(date, player, testid, braking_impulse_n_s,   propulsive_impulse_n_s, braking_phase_s, propulsive_phase_s, impulse_ratio, jump_height_m, peak_braking_force_n, peak_propulsive_force_n,  positive_impulse_n_s, positive_net_impulse_n_s, l_r_braking_impulse_index_percent, l_r_braking_impulse_index_percent, l_r_peak_braking_force_percent, l_r_peak_propulsive_force_percent, flight_time_s, time_to_takeoff_s, systemweight)) %>% 
+  mutate.(kg = systemweight / 9.81, 
+          ft_ct = flight_time_s / time_to_takeoff_s) %>% # changing N to kg
+  mutate.(kg_scale = c(scale(kg)), 
+          .by = player) %>% 
+  filter.(kg_scale > -5) %>% 
+  mutate.(across.(c(4:21), mean, .names = "{.col}_avg"), .by = c(player, date)) %>% 
+  mutate.(across.(c(4:21), ~.x / kg, .names = "{.col}_bw"))
+
+summarised <- data_filt %>% 
+  summarise.(across.(-c(testid), mean), .by = c(date, player))
+  
+workload <- data_filt %>% 
+  select.(date, player, testid, propulsive_impulse_n_s) %>%
+  pivot_longer.(-c(date, player, testid)) %>% 
+  summarise.(avg_metric = mean(value), 
+             .by = c(player, date, name)) %>%
+  mutate.(metric_scale = c(scale(avg_metric)), 
+          .by = c(player, name)) %>% 
+  tidytable::dt(, roll := runner(avg_metric, function(x) last(c(scale(x))), k = 28), by = c("name", "player")) %>% 
+  mutate.(z_color = case_when.(metric_scale < roll - 2 ~ "#E8FA5BFF",
+                               metric_scale > roll + 2 ~ "#E8FA5BFF",
+                               TRUE ~ "#000000"), 
+          .by = player)
+
+player1 <- data_filt %>%
+  filter.(player %in% "Player1") %>% 
+  drop_na.(kg) %>% 
+  summarise.(across.(c(contains("impulse"), contains("force"), contains("phase"), kg), mean))
+
+all_players <- data_filt %>% 
+  drop_na.(kg) %>% 
+    summarise.(across.(c(contains("impulse"), contains("force"), contains("phase"), kg), mean))
+
+```
+### Purpose
+
+The purpose of this report is to highlight the past year of jumps for 5 players within the Toronto Blue Jays organization.
+
+### Methods
+
+Counter Movement Jump data from 5 separate players within the Toronto Blue Jays organization was provided and processed. Trials where weight was greater than 5 standard deviations away from that players mean were filtered out. Body weight (BW), propulsive impulse (PI), peak propulsive force asymmetry (PF) and workload were investigated, with comparisons being made at the both the group and player level. Weight in kilograms was calculated as the system weight in Newtons divided by gravity (9.81). PI was normalized to BW by dividing PI by the players weight in kg. Workload was monitored with a rolling 28-day z score ribbon +/- 2 standard deviations (sd) similar to statistical process control (Sands, 2017). When a date is outside of the ribbon, this is an instance where a player is possibly in a state of detraining or overreaching, which can lead to an increased risk of injury. PI was used as a metric because of its correlation to jump height as well as being a time constrained metric (Benjanuvatra, 2013). Since Hawkins Dynamic does not have a PI asymmetry calculation PF was used as a way to show imbalances between the left and right leg. A 10-15% imbalance between the 2 has been shown to have an increase risk of injury (Hewitt, 2012 and Cone, 2020). PI was used for the workload monitoring as well because of fatigue's effect on force production and the speed of signal transportation between the muscles and brain. 
+
+### Results
+
+#### Weight
+
+With baseball being a long, grueling season the ability for a player to maintain a steady weight is imperative when it comes to performance. A large increase or decrease in weight can be red flag for possible injury as well as for performance. Weight fluctuations may arise from fluctuations in workload and/or poor nutrition habits (either eating too much or too little). Figure 1 shows Player 5 did not do a great job of maintaining weight throughout the year. Around the end of September, this player was well above 2 sd from the group mean, and what also may be a red flag is the quick drop of around 5 kilos (~10 lbs) within a month from the end of September to the end of October. The one date that we have BW for Player 1, they are well below average and may just be a small player in stature. Players 2, 3, and 4 seem to have done a good job of maintaining their weight throughout the season are around average for the group with no major fluctuations. Player 2 had a steady decline in weight after the All-Star break, which may be a red flag in isolation, but when taken in context of other metrics may not be.
+
+``` {r weight, echo=FALSE, warnings=FALSE, fig.cap = "Weight over the 2022 season by player. Black line is data set mean. Ribbon is +/- 2 sd"}
+
+summarised %>% 
+  ggplot(aes(date, kg)) + 
+  geom_ribbon(aes(ymin = mean(kg) - (sd(kg) * 2), 
+                  ymax = mean(kg) + (sd(kg) * 2)), 
+              fill = "gray80") + 
+  geom_point(aes(color = player)) + 
+  geom_line(aes(color = player)) + 
+  geom_hline(yintercept = mean(summarised$kg)) +
+  labs(title = "Weight over 2022 Season", y = "weight (kg)") +
+  scale_x_date(breaks = "2 months")
+
+```
+
+#### Propulsive Impulse
+
+When comparing players using PI scaled to BW as the metric players 2, 3, and 4 are all average to above average when compared to the group (Figure 2). As noted above, Player 2's decline in BW corresponded with increases in PI so this player has possibly improved their body composition and is able to create force quicker at this BW. Player 5, however is below average and drops outside of 2 sd of the group mean. The extra weight that Player 5 put on seems to not correlate to performance and is possibly a result of a decrease in body composition. Player 1 has a below average PI for their BW so this player may benefit from a general strength training and nutrition plan.
+
+``` {r propulsive impulse, echo=F, warnings=F, fig.cap = "Propulsive impulse normalized to weight over the 2022 season by player. Black line is data set mean. Ribbon is +/- 2 sd"}
+
+summarised %>% 
+  ggplot(aes(date, propulsive_impulse_n_s_bw)) + 
+  geom_ribbon(aes(ymin = mean(propulsive_impulse_n_s_bw) - (sd(propulsive_impulse_n_s_bw) * 2), 
+                  ymax = mean(propulsive_impulse_n_s_bw) + (sd(propulsive_impulse_n_s_bw) * 2)), 
+              fill = "gray80") + 
+  geom_point(aes(color = player)) + 
+  geom_line(aes(color = player)) + 
+  geom_hline(yintercept = mean(summarised$propulsive_impulse_n_s_bw)) +
+  scale_x_date(breaks = "2 months") +
+  labs(title = "BW Normalized PI over 2022 Season", y = "propulsive impulse ((N*s)/BW)")
+  
+
+```
+
+#### Asymmetry
+
+All players were able to stay within the 10% difference threshold. Player 3 developed a fairly large imbalance possibly due to fatigue of spring training, however it never reached that 10% threshold. Player 2 had one instance of having greater than a 5% imbalance, but that was the only instance. All others were within a 5% imbalance throughout the year. 
+
+``` {r imbalance, echo=FALSE, warnings=FALSE, fig.cap = "Propulsive Force Imbalance over 2022 season. Black line is mean and ribbon is =/-2 sd"}
+
+summarised %>% 
+  ggplot(aes(date, l_r_peak_propulsive_force_percent)) + 
+  geom_ribbon(aes(ymin = -10, 
+                  ymax = 10), 
+              fill = "gray80") + 
+  geom_point(aes(color = player)) + 
+  geom_line(aes(color = player)) + 
+  geom_hline(yintercept = mean(summarised$l_r_peak_propulsive_force_percent)) +
+  scale_x_date(breaks = "2 months") +
+  labs(title = "PF Asymmetry over 2022 Season", y = "percent peak propulsive force asymmetry (%)")
+  
+
+```
+
+#### Workload
+
+When comparing each player to themselves over the season, overall there was only one player that had a jump outside of their 2 sd ribbon (Figure 3). Only Player 2 had a jump in April that was outside of the ribbon, which is more than likely from a steady decline in their PI. This could be a sign of steady fatigue throughout the year and possibly something to pay attention to with this player for next season. Players 3 and 4 had a steady increases after the All-Star break, which shows that there were either strategies changed after the break, or the training adaptations were able to take effect with the time off. Player 5 started low when they began jumPIng in May, but was able to maintain themselves throughout the year. What is interesting with Player 5 is the drop in weight from September to October, also corresponds with their drop in PI so this drop in weight and PI may have been from an increased workload. Player 1 only has one day of jumps, they are excluded from this section.
+
+``` {r workload, echo=FALSE, warnings=FALSE, fig.cap = "Workload over the 2022 season by player. Ribbon is 28-day rolling mean +/- 2 sd.", fig.height = 4}
+
+workload2 <- workload %>% 
+  filter.(player %in% "Player2") %>% 
+  ggplot() +
+  geom_ribbon(aes(x = date, 
+                  ymin = roll - 2, 
+                  ymax = roll + 2), fill = "gray70") +
+  geom_line(aes(date, metric_scale), color = "#000000") +
+  geom_point(aes(date, metric_scale, color = z_color), size = 3) +
+  scale_color_identity() +
+  labs(title = "Player 2", y = "impulse z-score") +
+  scale_x_date(breaks = "3 months", 
+               limits = as.Date(c("2022-02-15", "2022-11-15")))
+
+workload3 <- workload %>% 
+  filter.(player %in% "Player3") %>% 
+  ggplot() +
+  geom_ribbon(aes(x = date, 
+                  ymin = roll - 2, 
+                  ymax = roll + 2), fill = "gray70") +
+  geom_line(aes(date, metric_scale), color = "#000000") +
+  geom_point(aes(date, metric_scale, color = z_color), size = 3) +
+  scale_color_identity() +
+  labs(title = "Player 3", y = "impulse z-score") +
+  scale_x_date(breaks = "3 months", 
+               limits = as.Date(c("2022-02-15", "2022-11-15")))
+
+workload4 <- workload %>% 
+  filter.(player %in% "Player4") %>% 
+  ggplot() +
+  geom_ribbon(aes(x = date, 
+                  ymin = roll - 2, 
+                  ymax = roll + 2), fill = "gray70") +
+  geom_line(aes(date, metric_scale), color = "#000000") +
+  geom_point(aes(date, metric_scale, color = z_color), size = 3) +
+  scale_color_identity() +
+  labs(title = "Player 4", y = "impulse z-score") +
+  scale_x_date(breaks = "3 months", 
+               limits = as.Date(c("2022-02-15", "2022-11-15")))
+
+workload5 <- workload %>% 
+  filter.(player %in% "Player5") %>% 
+  ggplot() +
+  geom_ribbon(aes(x = date, 
+                  ymin = roll - 2, 
+                  ymax = roll + 2), fill = "gray70") +
+  geom_line(aes(date, metric_scale), color = "#000000") +
+  geom_point(aes(date, metric_scale, color = z_color), size = 3) +
+  scale_color_identity() +
+  labs(title = "Player 5", y = "PI z-score") +
+  scale_x_date(breaks = "3 months", 
+               limits = as.Date(c("2022-02-15", "2022-11-15")))
+
+(workload2 + workload3) / (workload4 + workload5) +
+  plot_annotation(title = "2022 Workload") + 
+  theme(plot.title = element_text(face = "bold"))
+
+```
+
+### Sources 
+
+Benjanuvatra N, Lay BS, Alderson JA, Blanksby BA. Comparison of ground reaction force asymmetry in one- and two-legged countermovement jumps. J     Strength Cond Res. 2013 Oct;27(10):2700-7. doi: 10.1519/JSC.0b013e318280d28e. PMID: 23287834.
+
+Cone, Simon, "Lower Limb Force Asymmetries during Landing and JumPIng Exercises" (2020). Master's Theses. 5141
+
+Hewit, Jennifer MSc, CSCS1; Cronin, John PhD1,2; Hume, Patria PhD1. Multidirectional Leg Asymmetry Assessment in Sport. Strength and Conditioning     Journal: February 2012 - Volume 34 - Issue 1 - p 82-86 doi: 10.1519/SSC.0b013e31823e83db
+
+Sands, W. A., Kavanaugh, A. A., Murray, S. R., McNeal, J. R., & Jemni, M. (2017). Modern techniques and technologies applied to training and         performance monitoring. International Journal of Sports Physiology and Performance, 12(Suppl 2), 63–72. https://doi.org/10.1123/ijspp.2016-0405
+  
+  
+  
+  
